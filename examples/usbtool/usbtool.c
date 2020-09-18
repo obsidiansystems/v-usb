@@ -302,9 +302,9 @@ retry:
         rxBuffer = malloc(64);
         // infinite control in transfer
         while(1) {
-            len = usb_control_msg(handle, (0x80 | (2<<5) | 0)/*in vendor device*/, 0xFF, 0 /*value=0*/, 0/*index=0*/, rxBuffer, 64, usbTimeout);
+            len = libusb_control_transfer(handle, (0x80 | (2<<5) | 0)/*in vendor device*/, 0xFF, 0 /*value=0*/, 0/*index=0*/, (unsigned char *)rxBuffer, 64, usbTimeout);
             if(len < 0){
-                fprintf(stderr, "USB error: %s\n", usb_strerror());
+                fprintf(stderr, "USB error: %s\n", libusb_strerror(len));
                 usleep(100000);
                 goto retry;
                 //exit(1);
@@ -365,9 +365,9 @@ retry:
         usbIndex = myAtoi(argv[4]);
         do {
         if(requestType & 0x80){   /* IN transfer */
-            len = usb_control_msg(handle, requestType, usbRequest, usbValue, usbIndex, rxBuffer, usbCount, usbTimeout);
+            len = libusb_control_transfer(handle, requestType, usbRequest, usbValue, usbIndex, (unsigned char *)rxBuffer, usbCount, usbTimeout);
         }else{              /* OUT transfer */
-            len = usb_control_msg(handle, requestType, usbRequest, usbValue, usbIndex, sendBytes, sendByteCount, usbTimeout);
+            len = libusb_control_transfer(handle, requestType, usbRequest, usbValue, usbIndex, (unsigned char *)sendBytes, sendByteCount, usbTimeout);
         }
         } while (retry);
     }else{  /* must be ACTION_INTERRUPT or ACTION_BULK */
