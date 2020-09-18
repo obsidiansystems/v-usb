@@ -36,7 +36,7 @@ int usbGetStringAscii(libusb_device_handle *dev, int index, char *buf, int bufle
  * libusb_strerror() to obtain the error message.
  */
 
-int usbOpenDevice(libusb_device_handle **device, int vendorID, char *vendorNamePattern, int productID, char *productNamePattern, char *serialNamePattern, FILE *printMatchingDevicesFp, FILE *warningsFp);
+int usbOpenDevice(libusb_device_handle **device, int busID, int vendorID, char *vendorNamePattern, int productID, char *productNamePattern, char *serialNamePattern, FILE *printMatchingDevicesFp, FILE *warningsFp);
 /* This function iterates over all devices on all USB busses and searches for
  * a device. Matching is done first by means of Vendor- and Product-ID (passed
  * in 'vendorID' and 'productID'. An ID of 0 matches any numeric ID (wildcard).

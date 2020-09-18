@@ -95,7 +95,7 @@ int             cnt, vid, pid, i, j, r;
     vid = rawVid[1] * 256 + rawVid[0];
     pid = rawPid[1] * 256 + rawPid[0];
     /* The following function is in opendevice.c: */
-    if(usbOpenDevice(&handle, vid, vendor, pid, product, NULL, NULL, NULL) != 0){
+    if(usbOpenDevice(&handle, NULL, vid, vendor, pid, product, NULL, NULL, NULL) != 0){
         fprintf(stderr, "Could not find USB device \"%s\" with vid=0x%x pid=0x%x\n", product, vid, pid);
         exit(1);
     }

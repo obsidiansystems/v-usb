@@ -113,7 +113,7 @@ int     rval, i;
 
 /* ------------------------------------------------------------------------- */
 
-int usbOpenDevice(libusb_device_handle **device, int vendorID, char *vendorNamePattern, int productID, char *productNamePattern, char *serialNamePattern, FILE *printMatchingDevicesFp, FILE *warningsFp)
+int usbOpenDevice(libusb_device_handle **device, int busID, int vendorID, char *vendorNamePattern, int productID, char *productNamePattern, char *serialNamePattern, FILE *printMatchingDevicesFp, FILE *warningsFp)
 {
     int     errorCode = USBOPEN_ERR_NOTFOUND;
     struct  libusb_device **devs;
@@ -137,7 +137,8 @@ int usbOpenDevice(libusb_device_handle **device, int vendorID, char *vendorNameP
                 fprintf(warningsFp, "Warning: cannot query device descriptor: %s\n", libusb_strerror(r));
             goto out;
         }
-        if ((vendorID == 0 || desc.idVendor == vendorID)
+        if((busID == 0 || libusb_get_bus_number(dev) == busID)
+             && (vendorID == 0 || desc.idVendor == vendorID)
              && (productID == 0 || desc.idProduct == productID)) {
             char    vendor[256], product[256], serial[256];
             int     len;
@@ -148,6 +149,10 @@ int usbOpenDevice(libusb_device_handle **device, int vendorID, char *vendorNameP
                     fprintf(warningsFp, "Warning: cannot open VID=0x%04x PID=0x%04x: %s\n", desc.idVendor, desc.idProduct, libusb_strerror(r));
                 dev_handle = NULL;
                 continue;
+            }
+            // we found a valid usb device, no need to walk more
+            if (vendorID && productID) {
+              break;
             }
             /* now check whether the names match: */
             len = vendor[0] = 0;
@@ -186,9 +191,9 @@ int usbOpenDevice(libusb_device_handle **device, int vendorID, char *vendorNameP
                             if(shellStyleMatch(serial, serialNamePattern)){
                                 if(printMatchingDevicesFp != NULL){
                                     if(serial[0] == 0){
-                                        fprintf(printMatchingDevicesFp, "VID=0x%04x PID=0x%04x vendor=\"%s\" product=\"%s\"\n", desc.idVendor, desc.idProduct, vendor, product);
+                                        fprintf(printMatchingDevicesFp, "BID=0x%02x VID=0x%04x PID=0x%04x vendor=\"%s\" product=\"%s\"\n", libusb_get_bus_number(dev), desc.idVendor, desc.idProduct, vendor, product);
                                     }else{
-                                        fprintf(printMatchingDevicesFp, "VID=0x%04x PID=0x%04x vendor=\"%s\" product=\"%s\" serial=\"%s\"\n", desc.idVendor, desc.idProduct, vendor, product, serial);
+                                        fprintf(printMatchingDevicesFp, "BID=0x%02x VID=0x%04x PID=0x%04x vendor=\"%s\" product=\"%s\" serial=\"%s\"\n", libusb_get_bus_number(dev), desc.idVendor, desc.idProduct, vendor, product, serial);
                                     }
                                 }else{
                                     break;
