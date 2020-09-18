@@ -28,6 +28,7 @@ On Windows use libusb-win32 from http://libusb-win32.sourceforge.net/.
 #include <usb.h>        /* this is libusb, see http://libusb.sourceforge.net/ */
 #include "opendevice.h" /* common code moved to separate module */
 
+#define DEFAULT_USB_BID         0   /* any */
 #define DEFAULT_USB_VID         0   /* any */
 #define DEFAULT_USB_PID         0   /* any */
 
@@ -37,6 +38,7 @@ static void usage(char *name)
     fprintf(stderr,
         "Options are:\n"
         "  -h or -? (print this help and exit)\n"
+        "  -b <bus-id> (defaults to 0x%x, can be '*' for any BID)\n"
         "  -v <vendor-id> (defaults to 0x%x, can be '*' for any VID)\n"
         "  -p <product-id> (defaults to 0x%x, can be '*' for any PID)\n"
         "  -V <vendor-name-pattern> (shell style matching, defaults to '*')\n"
@@ -45,13 +47,15 @@ static void usage(char *name)
         "  -d <databytes> (data byte for request, comma separated list)\n"
         "  -D <file> (binary data for request taken from file)\n"
         "  -O <file> (write received data bytes to file)\n"
-        "  -b (binary output format, default is hex)\n"
+        "  -a (binary output format, default is hex)\n"
         "  -n <count> (maximum number of bytes to receive)\n"
         "  -e <endpoint> (specify endpoint for some commands)\n"
         "  -t <timeout> (specify USB timeout in milliseconds)\n"
         "  -c <configuration> (device configuration to choose)\n"
         "  -i <interface> (configuration interface to claim)\n"
         "  -w (suppress USB warnings, default is verbose)\n"
+        "  -s (suppress set configuration)\n"
+        "  -r (restart operation infinitely)\n"
         "\n"
         "Commands are:\n"
         "  list (list all matching devices by name)\n"
@@ -70,6 +74,7 @@ static void usage(char *name)
 
 }
 
+static int  busID = DEFAULT_USB_BID;
 static int  vendorID = DEFAULT_USB_VID;
 static int  productID = DEFAULT_USB_PID;
 static char *vendorNamePattern = "*";
@@ -81,6 +86,8 @@ static char *outputFile = NULL;
 static int  endpoint = 0;
 static int  outputFormatIsBinary = 0;
 static int  showWarnings = 1;
+static int  disableSetConfiguration = 0;
+static int  retry = 0;
 static int  usbTimeout = 5000;
 static int  usbCount = 128;
 static int  usbConfiguration = 1;
@@ -144,6 +151,8 @@ int     i, numEntries;
 #define ACTION_CONTROL      1
 #define ACTION_INTERRUPT    2
 #define ACTION_BULK         3
+#define ACTION_CONTROL_RAW  4
+#define ACTION_LOG          5
 
 int main(int argc, char **argv)
 {
@@ -152,7 +161,7 @@ int             opt, len, action, argcnt;
 char            *myName = argv[0], *s, *rxBuffer = NULL;
 FILE            *fp;
 
-    while((opt = getopt(argc, argv, "?hv:p:V:P:S:d:D:O:e:n:tbw")) != -1){
+    while((opt = getopt(argc, argv, "?hv:p:b:V:P:S:d:D:O:e:n:t:awi:sr")) != -1){
         switch(opt){
         case 'h':
         case '?':   /* -h or -? (print this help and exit) */
@@ -160,6 +169,9 @@ FILE            *fp;
             exit(1);
         case 'v':   /* -v <vendor-id> (defaults to 0x%x, can be '*' for any VID) */
             vendorID = myAtoi(optarg);
+            break;
+        case 'b':   /* -b <bus-id> (defaults to 0x%x, can be '*' for any VID) */
+            busID = myAtoi(optarg);
             break;
         case 'p':   /* -p <product-id> (defaults to 0x%x, can be '*' for any PID) */
             productID = myAtoi(optarg);
@@ -210,7 +222,7 @@ FILE            *fp;
         case 't':   /* -t <timeout> (specify USB timeout in milliseconds) */
             usbTimeout = myAtoi(optarg);
             break;
-        case 'b':   /* -b (binary output format, default is hex) */
+        case 'a':   /* -a (binary output format, default is hex) */
             outputFormatIsBinary = 1;
             break;
         case 'n':   /* -n <count> (maximum number of bytes to receive) */
@@ -224,6 +236,12 @@ FILE            *fp;
             break;
         case 'w':   /* -w (suppress USB warnings, default is verbose) */
             showWarnings = 0;
+            break;
+        case 's':   /* -s (suppress set configuration) */
+            disableSetConfiguration = 1;
+            break;
+        case 'r':
+            retry = 1;
             break;
         default:
             fprintf(stderr, "Option -%c unknown\n", opt);
@@ -243,6 +261,12 @@ FILE            *fp;
     }else if(strcasecmp(argv[0], "control") == 0){
         action = ACTION_CONTROL;
         argcnt = 7;
+    }else if(strcasecmp(argv[0], "log") == 0){
+        action = ACTION_LOG;
+        argcnt = 1;
+    }else if(strcasecmp(argv[0], "controlraw") == 0){
+        action = ACTION_CONTROL_RAW;
+        argcnt = 5;
     }else if(strcasecmp(argv[0], "interrupt") == 0){
         action = ACTION_INTERRUPT;
     }else if(strcasecmp(argv[0], "bulk") == 0){
@@ -261,15 +285,62 @@ FILE            *fp;
         fprintf(stderr, "Warning: only %d arguments expected, rest ignored.\n", argcnt);
     }
     usb_init();
-    if(usbOpenDevice(&handle, vendorID, vendorNamePattern, productID, productNamePattern, serialPattern, action == ACTION_LIST ? stdout : NULL, showWarnings ? stderr : NULL) != 0){
-        fprintf(stderr, "Could not find USB device with VID=0x%x PID=0x%x Vname=%s Pname=%s Serial=%s\n", vendorID, productID, vendorNamePattern, productNamePattern, serialPattern);
+retry:
+    if(usbOpenDevice(&handle, busID, vendorID, vendorNamePattern, productID, productNamePattern, serialPattern, action == ACTION_LIST ? stdout : NULL, showWarnings ? stderr : NULL) != 0){
+        if (action == ACTION_LOG) {
+            usleep(100000);
+            goto retry;
+        }
+        else 
+        {
+            fprintf(stderr, "Could not find USB device with VID=0x%x PID=0x%x Vname=%s Pname=%s Serial=%s\n", vendorID, productID, vendorNamePattern, productNamePattern, serialPattern);
+        }
         exit(1);
     }
+    if (action == ACTION_LOG) {
+        rxBuffer = malloc(64);
+        // infinite control in transfer
+        while(1) {
+            len = usb_control_msg(handle, (0x80 | (2<<5) | 0)/*in vendor device*/, 0xFF, 0 /*value=0*/, 0/*index=0*/, rxBuffer, 64, usbTimeout);
+            if(len < 0){
+                fprintf(stderr, "USB error: %s\n", usb_strerror());
+                usleep(100000);
+                goto retry;
+                //exit(1);
+            }
+            // long delay when nothing received
+            if (len == 0) {
+                usleep(100000);
+                continue;
+            }
+            char * s = rxBuffer;
+            while(len--) {
+                unsigned char c = *s++;
+                if (c >= 0x20 && c<= 0x7E) {
+                    printf("%c", c);
+                }
+                else if (c == '\r') {
+                    // ignore
+                }
+                else if (c == '\n') {
+                    printf("\n");
+                }
+                else {
+                    printf("<%02x>", c);
+                }
+            }
+            fflush(stdout);
+            usleep(10000);
+        }
+    }
+
     if(action == ACTION_LIST)
         exit(0);                /* we've done what we were asked to do already */
-    usbDirection = parseEnum(argv[1], "out", "in", NULL);
-    if(usbDirection){   /* IN transfer */
-        rxBuffer = malloc(usbCount);
+    if (action != ACTION_CONTROL_RAW) {
+      usbDirection = parseEnum(argv[1], "out", "in", NULL);
+      if(usbDirection){   /* IN transfer */
+          rxBuffer = malloc(usbCount);
+      }
     }
     if(action == ACTION_CONTROL){
         int requestType;
@@ -279,15 +350,31 @@ FILE            *fp;
         usbValue = myAtoi(argv[5]);
         usbIndex = myAtoi(argv[6]);
         requestType = ((usbDirection & 1) << 7) | ((usbType & 3) << 5) | (usbRecipient & 0x1f);
+        do {
         if(usbDirection){   /* IN transfer */
             len = usb_control_msg(handle, requestType, usbRequest, usbValue, usbIndex, rxBuffer, usbCount, usbTimeout);
         }else{              /* OUT transfer */
             len = usb_control_msg(handle, requestType, usbRequest, usbValue, usbIndex, sendBytes, sendByteCount, usbTimeout);
         }
+        } while (retry);
+    }else if(action == ACTION_CONTROL_RAW){
+        int requestType = myAtoi(argv[1]);
+        usbRequest = myAtoi(argv[2]);
+        usbValue = myAtoi(argv[3]);
+        usbIndex = myAtoi(argv[4]);
+        do {
+        if(requestType & 0x80){   /* IN transfer */
+            len = usb_control_msg(handle, requestType, usbRequest, usbValue, usbIndex, rxBuffer, usbCount, usbTimeout);
+        }else{              /* OUT transfer */
+            len = usb_control_msg(handle, requestType, usbRequest, usbValue, usbIndex, sendBytes, sendByteCount, usbTimeout);
+        }
+        } while (retry);
     }else{  /* must be ACTION_INTERRUPT or ACTION_BULK */
         int retries = 1;
-        if(usb_set_configuration(handle, usbConfiguration) && showWarnings){
-            fprintf(stderr, "Warning: could not set configuration: %s\n", usb_strerror());
+        if (!disableSetConfiguration) {
+          if(usb_set_configuration(handle, usbConfiguration) && showWarnings){
+              fprintf(stderr, "Warning: could not set configuration: %s\n", usb_strerror());
+          }
         }
         /* now try to claim the interface and detach the kernel HID driver on
          * linux and other operating systems which support the call.
@@ -301,6 +388,8 @@ FILE            *fp;
         }
         if(len != 0 && showWarnings)
             fprintf(stderr, "Warning: could not claim interface: %s\n", usb_strerror());
+        
+        do {
         if(action == ACTION_INTERRUPT){
             if(usbDirection){   /* IN transfer */
                 len = usb_interrupt_read(handle, endpoint, rxBuffer, usbCount, usbTimeout);
@@ -314,6 +403,7 @@ FILE            *fp;
                 len = usb_bulk_write(handle, endpoint, sendBytes, sendByteCount, usbTimeout);
             }
         }
+        } while(retry);
     }
     if(len < 0){
         fprintf(stderr, "USB error: %s\n", usb_strerror());
