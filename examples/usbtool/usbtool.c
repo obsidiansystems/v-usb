@@ -25,7 +25,7 @@ On Windows use libusb-win32 from http://libusb-win32.sourceforge.net/.
 #include <ctype.h>
 #include <errno.h>
 
-#include <usb.h>        /* this is libusb, see http://libusb.sourceforge.net/ */
+#include <libusb.h>        /* this is libusb, see http://libusb.sourceforge.net/ */
 #include "opendevice.h" /* common code moved to separate module */
 
 #define DEFAULT_USB_BID         0   /* any */
@@ -156,8 +156,9 @@ int     i, numEntries;
 
 int main(int argc, char **argv)
 {
-usb_dev_handle  *handle = NULL;
+libusb_device_handle  *handle = NULL;
 int             opt, len, action, argcnt;
+int             r = 0;
 char            *myName = argv[0], *s, *rxBuffer = NULL;
 FILE            *fp;
 
@@ -284,7 +285,7 @@ FILE            *fp;
     if(argc > argcnt){
         fprintf(stderr, "Warning: only %d arguments expected, rest ignored.\n", argcnt);
     }
-    usb_init();
+    libusb_init(NULL);
 retry:
     if(usbOpenDevice(&handle, busID, vendorID, vendorNamePattern, productID, productNamePattern, serialPattern, action == ACTION_LIST ? stdout : NULL, showWarnings ? stderr : NULL) != 0){
         if (action == ACTION_LOG) {
@@ -352,9 +353,9 @@ retry:
         requestType = ((usbDirection & 1) << 7) | ((usbType & 3) << 5) | (usbRecipient & 0x1f);
         do {
         if(usbDirection){   /* IN transfer */
-            len = usb_control_msg(handle, requestType, usbRequest, usbValue, usbIndex, rxBuffer, usbCount, usbTimeout);
+            len = libusb_control_transfer(handle, requestType, usbRequest, usbValue, usbIndex, (unsigned char *)rxBuffer, usbCount, usbTimeout);
         }else{              /* OUT transfer */
-            len = usb_control_msg(handle, requestType, usbRequest, usbValue, usbIndex, sendBytes, sendByteCount, usbTimeout);
+            len = libusb_control_transfer(handle, requestType, usbRequest, usbValue, usbIndex, (unsigned char *)sendBytes, sendByteCount, usbTimeout);
         }
         } while (retry);
     }else if(action == ACTION_CONTROL_RAW){
@@ -372,41 +373,43 @@ retry:
     }else{  /* must be ACTION_INTERRUPT or ACTION_BULK */
         int retries = 1;
         if (!disableSetConfiguration) {
-          if(usb_set_configuration(handle, usbConfiguration) && showWarnings){
-              fprintf(stderr, "Warning: could not set configuration: %s\n", usb_strerror());
+          r = libusb_set_configuration(handle, usbConfiguration);
+          if(r < 0 && showWarnings){
+              fprintf(stderr, "Warning: could not set configuration: %s\n", libusb_strerror(r));
           }
         }
         /* now try to claim the interface and detach the kernel HID driver on
          * linux and other operating systems which support the call.
          */
-        while((len = usb_claim_interface(handle, usbInterface)) != 0 && retries-- > 0){
+        while((len = libusb_claim_interface(handle, usbInterface)) != 0 && retries-- > 0){
 #ifdef LIBUSB_HAS_DETACH_KERNEL_DRIVER_NP
-            if(usb_detach_kernel_driver_np(handle, 0) < 0 && showWarnings){
-                fprintf(stderr, "Warning: could not detach kernel driver: %s\n", usb_strerror());
+            r = libusb_detach_kernel_driver(handle, 0);
+            if(r != LIBUSB_SUCCESS && showWarnings){
+                fprintf(stderr, "Warning: could not detach kernel driver: %s\n", libusb_strerror(r));
             }
 #endif
         }
         if(len != 0 && showWarnings)
-            fprintf(stderr, "Warning: could not claim interface: %s\n", usb_strerror());
-        
+            fprintf(stderr, "Warning: could not claim interface: %s\n", libusb_strerror(len));
+
         do {
         if(action == ACTION_INTERRUPT){
             if(usbDirection){   /* IN transfer */
-                len = usb_interrupt_read(handle, endpoint, rxBuffer, usbCount, usbTimeout);
+                r = libusb_interrupt_transfer(handle, endpoint, (unsigned char *)rxBuffer, usbCount, &len, usbTimeout);
             }else{
-                len = usb_interrupt_write(handle, endpoint, sendBytes, sendByteCount, usbTimeout);
+                r = libusb_interrupt_transfer(handle, endpoint, (unsigned char *)sendBytes, sendByteCount, &len, usbTimeout);
             }
         }else{
             if(usbDirection){   /* IN transfer */
-                len = usb_bulk_read(handle, endpoint, rxBuffer, usbCount, usbTimeout);
+                r = libusb_bulk_transfer(handle, endpoint, (unsigned char *)rxBuffer, usbCount, &len, usbTimeout);
             }else{
-                len = usb_bulk_write(handle, endpoint, sendBytes, sendByteCount, usbTimeout);
+                r = libusb_bulk_transfer(handle, endpoint, (unsigned char *)sendBytes, sendByteCount, &len, usbTimeout);
             }
         }
         } while(retry);
     }
-    if(len < 0){
-        fprintf(stderr, "USB error: %s\n", usb_strerror());
+    if(r != 0){
+        fprintf(stderr, "USB error: %s\n", libusb_strerror(r));
         exit(1);
     }
     if(usbDirection == 0)   /* OUT */
@@ -438,7 +441,7 @@ retry:
                 fprintf(fp, "\n");
         }
     }
-    usb_close(handle);
+    libusb_close(handle);
     if(rxBuffer != NULL)
         free(rxBuffer);
     return 0;
